@@ -48,7 +48,17 @@ class Player(pygame.sprite.Sprite):
         self.scroll_speed = 4  # Speed at which the player and background scroll
         self.original_y = y
         self.state = Player.BOTTOM
-        self.stop_time = 0
+
+        self.parachute_count = 1
+
+        self.angle = 0
+        self.is_spinning = False
+
+    def start_spinning(self):
+        self.is_spinning = True
+
+    def stop_spinning(self):
+        self.is_spinning = False
 
     def update(self, keys):
 
@@ -56,9 +66,10 @@ class Player(pygame.sprite.Sprite):
         if self.state == Player.BOTTOM:
             self.image = self.f_image
             self.rect = self.image.get_rect(center=self.rect.center)
-            if keys[pygame.K_SPACE]:
+            if keys[pygame.K_SPACE] and self.parachute_count > 0:
                 self.state = Player.ASCENDING
-        
+                self.parachute_count -= 1
+
         elif self.state == Player.ASCENDING:
             self.image = self.p_image
             self.rect = self.image.get_rect(center=self.rect.center)
@@ -87,6 +98,21 @@ class Player(pygame.sprite.Sprite):
             self.rect.x -= 2
         if keys[pygame.K_RIGHT]:
             self.rect.x += 2
+
+        if self.is_spinning == True:
+
+            self.angle -= 5    
+            self.angle %= 360
+            if self.angle == 0:
+                self.stop_spinning()
+                self.image = self.f_image
+                self.rect = self.image.get_rect(center=self.rect.center)
+
+            else:
+                self.image = pygame.transform.rotate(self.f_image, self.angle)
+                self.rect = self.image.get_rect(center=self.rect.center)
+                self.rect.centerx -= 4
+                self.rect.centery -= 1
 
     def draw(self, surface):
         surface.blit(self.image, self.rect)
@@ -134,13 +160,42 @@ class Balloon(pygame.sprite.Sprite):
 class Wind(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.image.load("assets/images/wind.png").convert_alpha()
+        self.image = pygame.image.load("assets/images/obstacles/wind.png").convert_alpha()
         self.image = pygame.transform.scale(self.image, (self.image.get_width() * 4, self.image.get_height() * 4))
+        self.mask = pygame.mask.from_surface(self.image)        
         self.rect = self.image.get_rect()
         self.rect.center = (x, y)
-    
+        self.time = pygame.time.get_ticks()
+
+    def update(self):
+        if self.time is not None:  # If the timer has been started...
+            # and 500 ms have elapsed, kill the sprite.
+            if pygame.time.get_ticks() - self.time >= 3000:
+                self.kill()
+
     def draw(self, surface):
         surface.blit(self.image, self.rect)        
+
+class Parachute(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.image.load("assets/images/player/actual_parachute.png").convert_alpha()
+        self.image = pygame.transform.scale(self.image, (self.image.get_width() * 2, self.image.get_height() * 2))
+        self.mask = pygame.mask.from_surface(self.image)        
+        self.rect = self.image.get_rect()
+        self.rect.center = (x, y)
+        self.speed = 2
+
+    def update(self):
+        # if self.time is not None:  # If the timer has been started...
+        #     # and 500 ms have elapsed, kill the sprite.
+        #     if pygame.time.get_ticks() - self.time >= 3000:
+        #         self.kill()
+
+        self.rect.centery -= self.speed      
+
+    def draw(self, surface):
+        surface.blit(self.image, self.rect) 
 
 def scroll_clouds(surface, scroll, bg_surf, tiles, bg_height):
     for i in range(0, tiles):
@@ -162,6 +217,13 @@ balloon_group = pygame.sprite.Group()
 last_balloon_spawn_time = pygame.time.get_ticks()
 
 wind_group = pygame.sprite.Group()
+last_wind_spawn_time = pygame.time.get_ticks()
+
+parachute_group = pygame.sprite.Group()
+last_parachute_spawn_time = pygame.time.get_ticks()
+
+# Create font
+f = pygame.font.Font(size = 72)
 
 running = True
 while running:
@@ -188,10 +250,22 @@ while running:
         last_plane_spawn_time = current_time  
 
     # Time-based balloon spawning
-    if current_time - last_balloon_spawn_time > 4000:
+    if current_time - last_balloon_spawn_time > 5000:
         balloon = Balloon(random.randint(50, WIDTH-50), HEIGHT+50)
         balloon_group.add(balloon) 
         last_balloon_spawn_time = current_time 
+
+    # Time-based wind spawning
+    if current_time - last_wind_spawn_time > 3000:
+        wind = Wind(random.randint(200, WIDTH-200), random.randint(200, HEIGHT-200))
+        wind_group.add(wind) 
+        last_wind_spawn_time = current_time
+
+    # Time-based parachute spawning
+    if current_time - last_parachute_spawn_time > 3000:
+        parachute = Parachute(random.randint(50, WIDTH-50), HEIGHT+50)
+        parachute_group.add(parachute) 
+        last_parachute_spawn_time = current_time 
 
     plane_group.update()
     plane_group.draw(surface)
@@ -199,11 +273,25 @@ while running:
     balloon_group.update()
     balloon_group.draw(surface)
 
+    wind_group.update()
+    wind_group.draw(surface)
+
+    parachute_group.update()
+    parachute_group.draw(surface)
+
     if pygame.sprite.spritecollide(player, plane_group, False, pygame.sprite.collide_mask) or pygame.sprite.spritecollide(player, balloon_group, False, pygame.sprite.collide_mask):
         running = False 
+
+    if pygame.sprite.spritecollide(player, wind_group, True, pygame.sprite.collide_mask):
+        player.start_spinning()
+
+    if pygame.sprite.spritecollide(player, parachute_group, True, pygame.sprite.collide_mask):
+        player.parachute_count += 1
     
-    # wind_group.draw(surface)
-    
+    player_score_str = str(player.parachute_count)
+    player_score_surface = f.render(player_score_str, 'AA', (0, 0, 0))
+    surface.blit(player_score_surface, (WIDTH - 100, 25))
+
     # Adjust scroll speed based on player's state
     if not player.state == Player.DESCENDING and (keys[pygame.K_SPACE] or player.state == Player.TOP):
         scroll -= player.scroll_speed
